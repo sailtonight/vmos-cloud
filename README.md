@@ -20,7 +20,8 @@ VMOS Cloud 控制台 → Developer → API 获取 AccessKeyID / SecretAccessKey�
 mkdir -p ~/.config/vmos && cat > ~/.config/vmos/credentials <<'CRED'
 VMOS_AK=...
 VMOS_SK=...
-VMOS_PAD=...   # 可选，默认 padCode
+# 可选，默认 padCode
+VMOS_PAD=...
 CRED
 chmod 600 ~/.config/vmos/credentials
 ```
@@ -31,8 +32,11 @@ chmod 600 ~/.config/vmos/credentials
 python3 scripts/vmos.py status
 python3 scripts/vmos.py shot
 python3 scripts/vmos.py ui
-python3 scripts/vmos.py tap --text 搜索
-python3 scripts/vmos.py text "lipstick" && python3 scripts/vmos.py key enter
+python3 scripts/vmos.py tap --text 搜索 --exact
+python3 scripts/vmos.py text "lipstick" --verify
+# 确认输入后再提交
+python3 scripts/vmos.py key enter
+python3 scripts/vmos.py wait-app com.ss.android.ugc.trill --timeout 120
 ```
 
 完整命令与操作规范见 [SKILL.md](SKILL.md)，接口索引见 [references/api.md](references/api.md)。

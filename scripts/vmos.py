@@ -268,6 +268,37 @@ def resolve_pad(args):
     raise VmosError("several pads on this account — pass --pad <padCode> or set VMOS_PAD (see `devices`)")
 
 
+def positive_seconds(value):
+    seconds = int(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return seconds
+
+
+def verify_text(ph, value, timeout):
+    """Observe only; never resend input when the accessibility tree is stale."""
+    time.sleep(1.5)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any(e["text"] == value for e in ph.ui()):
+            return
+        time.sleep(1)
+    raise VmosError("input sent, but exact text was not observed in UI; take a `shot` and "
+                    "check the field before retrying (text was not resent)")
+
+
+def wait_app(ph, package, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        d = first(ph.api("listInstalledApp")["data"])
+        for app in (d or {}).get("apps") or []:
+            if app.get("packageName") == package:
+                return app
+        time.sleep(2)
+    raise VmosError(f"{package!r} not observed in installed apps within {timeout}s; "
+                    "installation may still be running — check its task or take a `shot`")
+
+
 # ---------- commands ----------
 
 def cmd_config(args):
@@ -331,6 +362,8 @@ def main():
 
     s = sub.add_parser("text", help="type into the focused field (unicode OK)")
     s.add_argument("value")
+    s.add_argument("--verify", action="store_true", help="wait for exact text in UI; never resend input")
+    s.add_argument("--timeout", type=positive_seconds, default=20, help="verification polling budget (seconds)")
 
     s = sub.add_parser("key", help="back|home|enter|recent|delete|search|<keycode>")
     s.add_argument("name")
@@ -348,6 +381,9 @@ def main():
 
     s = sub.add_parser("apps", help="installed apps")
     s.add_argument("--name")
+    s = sub.add_parser("wait-app", help="wait until an exact package appears in installed apps")
+    s.add_argument("package")
+    s.add_argument("--timeout", type=positive_seconds, default=120)
     s = sub.add_parser("install", help="download APK from URL and auto-install (async)")
     s.add_argument("url")
     s.add_argument("--package")
@@ -417,7 +453,9 @@ def run(args):
             if args.index is not None:
                 hits = [e for e in els if e["i"] == args.index]
             else:
-                hits = find(els, args.text, exact=args.exact)
+                hits = find(els, args.text, exact=True)
+                if not hits and not args.exact:
+                    hits = find(els, args.text)
             if not hits:
                 raise VmosError(f"no on-screen element matches {args.text or args.index!r} — run `ui` or `shot`")
             e = hits[0]
@@ -442,7 +480,11 @@ def run(args):
         print("ok")
     elif c == "text":
         ph.api("inputText", {"text": args.value})
-        print("ok")
+        if args.verify:
+            verify_text(ph, args.value, args.timeout)
+            print("input sent; exact text observed in UI (confirm target field if ambiguous)")
+        else:
+            print("ok (input sent; field contents not verified)")
     elif c == "key":
         code = KEYS.get(args.name.lower()) or (int(args.name) if args.name.isdigit() else None)
         if code is None:
@@ -468,12 +510,15 @@ def run(args):
             return out(apps, True)
         for a in apps:
             print(f"{a.get('packageName')}  {a.get('appName')}  v{a.get('versionName')}  state={a.get('appState')}")
+    elif c == "wait-app":
+        app = wait_app(ph, args.package, args.timeout)
+        out(app, args.json)
     elif c == "install":
         body = {"url": args.url, "autoInstall": 1}
         if args.package:
             body["packageName"] = args.package
         out(ph.api("uploadFileV3", body)["data"], True)
-        print("# async — check with `task <taskId>` or `apps --name ...`", file=sys.stderr)
+        print("# async — check with `task <taskId>` or `wait-app <package>`", file=sys.stderr)
     elif c == "uninstall":
         out(call("uninstallApp", {"padCodeList": [ph.pad], "apkPackageList": [args.package]})["data"], True)
     elif c == "shell":
